@@ -3,385 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Control Terra - Hand Tracking</title>
+    <title>Planeta Tierra 3D - Realista</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- MediaPipe Hands -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
-        #container { position: relative; width: 100vw; height: 100vh; }
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #canvas-container { width: 100vw; height: 100vh; }
         
-        /* Video de fondo (espejo) */
-        #input_video {
+        .ui-panel {
             position: absolute;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* Efecto espejo */
-            z-index: 1;
-            opacity: 0.3; /* Oscurecer un poco para que resalte la tierra */
-        }
-
-        /* Canvas 3D */
-        #output_canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 2;
-        }
-
-        /* UI Overlay */
-        #ui-layer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10;
-            pointer-events: none;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            padding: 20px;
-        }
-
-        .loader {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
-            color: #00ffcc;
-            padding: 20px 40px;
-            border-radius: 12px;
-            text-align: center;
-            border: 1px solid #00ffcc;
-            box-shadow: 0 0 20px rgba(0, 255, 204, 0.3);
-            pointer-events: auto;
-            transition: opacity 0.5s ease;
-        }
-
-        .hud-panel {
-            background: rgba(0, 10, 30, 0.6);
-            backdrop-filter: blur(5px);
-            border-left: 4px solid #00ffcc;
-            padding: 15px;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid #444;
             color: white;
-            max-width: 300px;
-            border-radius: 0 8px 8px 0;
-        }
-
-        .status-dot {
-            height: 12px;
-            width: 12px;
-            background-color: #ff3333;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 8px;
-            box-shadow: 0 0 8px #ff3333;
-        }
-        .status-dot.active {
-            background-color: #33ff33;
-            box-shadow: 0 0 8px #33ff33;
-        }
-
-        /* Cursor de mano virtual */
-        #hand-cursor {
-            position: absolute;
-            width: 40px;
-            height: 40px;
-            border: 2px solid rgba(0, 255, 204, 0.5);
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: sans-serif;
             pointer-events: none;
-            display: none;
-            z-index: 11;
-            box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
+            user-select: none;
+            z-index: 10;
         }
         
-        #hand-cursor::after {
-            content: '';
+        #loading {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 4px;
-            height: 4px;
-            background: #00ffcc;
-            border-radius: 50%;
+            top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-        }
-
-        @keyframes pulse {
-            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
-            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+            color: #00aaff;
+            font-family: sans-serif;
+            font-size: 1.2rem;
+            pointer-events: none;
+            text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #00aaff;
+            z-index: 20;
         }
     </style>
 </head>
 <body>
 
-<div id="container">
-    <video id="input_video" playsinline></video>
-    <canvas id="output_canvas"></canvas>
-    <div id="hand-cursor"></div>
+<div id="loading">Cargando texturas del planeta...</div>
+<div id="canvas-container"></div>
 
-    <div id="ui-layer">
-        <div class="hud-panel mt-4">
-            <h1 class="text-xl font-bold mb-1 text-cyan-300">Explorador Planetario</h1>
-            <div class="flex items-center text-sm mb-2">
-                <span id="status-dot" class="status-dot"></span>
-                <span id="status-text">Esperando cámara...</span>
-            </div>
-            <p class="text-xs text-gray-300">
-                1. Levanta tu mano frente a la cámara.<br>
-                2. Mueve la palma para rotar la Tierra.<br>
-                3. Pellizca (Junta índice y pulgar) para hacer Zoom.
-            </p>
-        </div>
-        
-        <div class="hud-panel mb-4 self-end text-right" style="border-left: none; border-right: 4px solid #00ffcc; border-radius: 8px 0 0 8px;">
-            <p class="text-xs text-gray-400">Desarrollado con Three.js & MediaPipe</p>
-        </div>
-    </div>
-
-    <div id="loading-screen" class="loader">
-        <h2 class="text-2xl font-bold mb-2">Iniciando Sistema</h2>
-        <p class="text-sm animate-pulse">Cargando modelos de IA y texturas...</p>
-        <p class="text-xs mt-4 text-gray-400">Por favor permite el acceso a la cámara cuando se solicite.</p>
-    </div>
+<div class="ui-panel">
+    <h1 class="text-xl font-bold text-blue-400 mb-1">Planeta Tierra 3D</h1>
+    <p class="text-sm text-gray-300">
+        🖱️ <strong>Click + Arrastrar:</strong> Rotar la vista<br>
+        🔍 <strong>Rueda:</strong> Zoom (Acercar/Alejar)
+    </p>
 </div>
 
 <script>
-    // --- VARIABLES GLOBALES ---
-    const videoElement = document.getElementById('input_video');
-    const canvasElement = document.getElementById('output_canvas');
-    const handCursor = document.getElementById('hand-cursor');
-    const loadingScreen = document.getElementById('loading-screen');
-    const statusDot = document.getElementById('status-dot');
-    const statusText = document.getElementById('status-text');
-
-    let scene, camera, renderer, earth, clouds, atmosphere;
-    let targetRotationX = 0;
-    let targetRotationY = 0;
-    let targetZoom = 5; // Posición Z de la cámara
+    // --- ESCENA ---
+    const container = document.getElementById('canvas-container');
+    const loadingElem = document.getElementById('loading');
+    const scene = new THREE.Scene();
     
-    // Variables para suavizar el movimiento (Lerp)
-    let currentRotationX = 0;
-    let currentRotationY = 0;
-    let currentZoom = 5;
+    // Cámara
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 5; 
 
-    // --- CONFIGURACIÓN THREE.JS ---
-    function initThreeJS() {
-        scene = new THREE.Scene();
+    // Renderizador
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    // Mejora de color
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    container.appendChild(renderer.domElement);
 
-        // Cámara
-        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.z = 5;
+    // Controles
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.minDistance = 2.0;
+    controls.maxDistance = 10;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.8;
 
-        // Renderizador con transparencia para ver el video de fondo
-        renderer = new THREE.WebGLRenderer({ canvas: canvasElement, alpha: true, antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+    // --- CARGA DE TEXTURAS ROBUSTA ---
+    const textureLoader = new THREE.TextureLoader();
+    // IMPORTANTE: Permitir carga cruzada para evitar errores de seguridad (CORS)
+    textureLoader.crossOrigin = 'anonymous';
 
-        // --- PLANETA TIERRA ---
-        const earthGeometry = new THREE.SphereGeometry(1.5, 64, 64);
+    const loadTexture = (url) => {
+        return textureLoader.load(url, 
+            () => { 
+                // Éxito
+                loadingElem.style.display = 'none'; 
+            },
+            undefined, 
+            (err) => { 
+                console.warn('Error cargando textura:', url);
+                loadingElem.innerText = "Error cargando imagen. Usando modo básico.";
+                setTimeout(() => loadingElem.style.display = 'none', 2000);
+            }
+        );
+    };
 
-        // Texturas (Usando URLs públicas estables)
-        const textureLoader = new THREE.TextureLoader();
-        
-        // Función auxiliar para cargar texturas y manejar errores
-        const loadTexture = (url) => {
-            return textureLoader.load(url, undefined, undefined, (err) => {
-                console.warn("Error cargando textura, usando color plano.", err);
-            });
-        };
+    // --- GRUPO TIERRA ---
+    const earthGroup = new THREE.Group();
+    scene.add(earthGroup);
 
-        const earthMaterial = new THREE.MeshPhongMaterial({
-            map: loadTexture('https://upload.wikimedia.org/wikipedia/commons/c/c1/Earth_Day_2026_Color_Image.jpg'), // Difusa
-            bumpMap: loadTexture('https://upload.wikimedia.org/wikipedia/commons/c/c3/Solarsystemscope_texture_2k_earth_normal_map.png'), // Relieve simulado
-            bumpScale: 0.05,
-            specularMap: loadTexture('https://upload.wikimedia.org/wikipedia/commons/1/15/Solarsystemscope_texture_2k_earth_specular_map.png'), // Brillo en océanos
-            specular: new THREE.Color('grey')
-        });
+    // 1. ESFERA PRINCIPAL
+    // Usamos PhongMaterial que reacciona bien a la luz
+    const earthGeometry = new THREE.SphereGeometry(1, 64, 64);
+    const earthMaterial = new THREE.MeshPhongMaterial({
+        color: 0x112244, // AZUL BASE (Por si falla la textura)
+        map: loadTexture('https://upload.wikimedia.org/wikipedia/commons/c/c1/Earth_Day_2026_Color_Image.jpg'),
+        bumpMap: loadTexture('https://upload.wikimedia.org/wikipedia/commons/c/c3/Solarsystemscope_texture_2k_earth_normal_map.png'),
+        bumpScale: 0.02,
+        specularMap: loadTexture('https://upload.wikimedia.org/wikipedia/commons/1/15/Solarsystemscope_texture_2k_earth_specular_map.png'),
+        specular: new THREE.Color(0x222222),
+        shininess: 10
+    });
+    const earth = new THREE.Mesh(earthGeometry, earthMaterial);
+    earthGroup.add(earth);
 
-        earth = new THREE.Mesh(earthGeometry, earthMaterial);
-        scene.add(earth);
+    // 2. NUBES (Ligeramente más grandes)
+    const cloudGeometry = new THREE.SphereGeometry(1.015, 64, 64);
+    const cloudMaterial = new THREE.MeshLambertMaterial({
+        map: loadTexture('https://upload.wikimedia.org/wikipedia/commons/0/07/Solarsystemscope_texture_2k_earth_clouds.jpg'),
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+    });
+    const clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
+    earthGroup.add(clouds);
 
-        // --- NUBES ---
-        const cloudGeometry = new THREE.SphereGeometry(1.53, 64, 64);
-        const cloudMaterial = new THREE.MeshLambertMaterial({
-            map: loadTexture('https://upload.wikimedia.org/wikipedia/commons/0/07/Solarsystemscope_texture_2k_earth_clouds.jpg'),
-            transparent: true,
-            opacity: 0.8,
-            blending: THREE.AdditiveBlending,
-            side: THREE.DoubleSide
-        });
-        clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
-        scene.add(clouds);
+    // 3. ATMÓSFERA (Halo Azul)
+    const atmGeometry = new THREE.SphereGeometry(1.15, 64, 64);
+    const atmMaterial = new THREE.MeshBasicMaterial({
+        color: 0x44aaff,
+        transparent: true,
+        opacity: 0.15,
+        side: THREE.BackSide, // Importante para que no tape la tierra
+        blending: THREE.AdditiveBlending
+    });
+    const atmosphere = new THREE.Mesh(atmGeometry, atmMaterial);
+    earthGroup.add(atmosphere);
 
-        // --- ATMÓSFERA (Glow) ---
-        const atmGeometry = new THREE.SphereGeometry(1.65, 64, 64);
-        const atmMaterial = new THREE.MeshBasicMaterial({
-            color: 0x44aaff,
-            transparent: true,
-            opacity: 0.1,
-            side: THREE.BackSide
-        });
-        atmosphere = new THREE.Mesh(atmGeometry, atmMaterial);
-        scene.add(atmosphere);
-
-        // --- LUCES ---
-        const ambientLight = new THREE.AmbientLight(0x333333);
-        scene.add(ambientLight);
-
-        const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        sunLight.position.set(5, 3, 5);
-        scene.add(sunLight);
-        
-        // Luz de borde para resaltar contra el video
-        const rimLight = new THREE.SpotLight(0x00ffff, 1);
-        rimLight.position.set(-5, 0, 2);
-        rimLight.lookAt(earth.position);
-        scene.add(rimLight);
-
-        animate();
+    // --- ESTRELLAS ---
+    const starGeo = new THREE.BufferGeometry();
+    const starCount = 3000;
+    const starPos = new Float32Array(starCount * 3);
+    for(let i=0; i<starCount*3; i++) {
+        starPos[i] = (Math.random() - 0.5) * 200;
     }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({color: 0xffffff, size: 0.15, transparent: true, opacity: 0.8});
+    const stars = new THREE.Points(starGeo, starMat);
+    scene.add(stars);
 
-    // --- LOOP DE ANIMACIÓN THREE.JS ---
+    // --- LUCES ---
+    // Luz ambiente suave
+    const ambientLight = new THREE.AmbientLight(0x404040, 1.5); 
+    scene.add(ambientLight);
+
+    // Luz solar fuerte y direccional
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    sunLight.position.set(5, 3, 5);
+    scene.add(sunLight);
+    
+    // Luz de contra (Rim light) para separar la tierra del fondo negro
+    const rimLight = new THREE.DirectionalLight(0x0044ff, 0.5);
+    rimLight.position.set(-5, 0, -5);
+    scene.add(rimLight);
+
+    // --- ANIMACIÓN ---
     function animate() {
         requestAnimationFrame(animate);
 
-        // Suavizado de movimiento (Linear Interpolation)
-        // Lerp factor 0.1 hace que el movimiento sea fluido y no tiemble
-        currentRotationX += (targetRotationX - currentRotationX) * 0.1;
-        currentRotationY += (targetRotationY - currentRotationY) * 0.1;
-        currentZoom += (targetZoom - currentZoom) * 0.1;
-
-        // Aplicar rotaciones
-        if (earth) {
-            earth.rotation.y = currentRotationY;
-            earth.rotation.x = currentRotationX;
-            // Rotación automática lenta de nubes
-            clouds.rotation.y = currentRotationY + (Date.now() * 0.00005);
-            clouds.rotation.x = currentRotationX;
-        }
-
-        // Aplicar Zoom
-        camera.position.z = currentZoom;
-
+        // Rotar nubes ligeramente diferente a la tierra para realismo
+        clouds.rotation.y += 0.0003;
+        
+        controls.update();
         renderer.render(scene, camera);
     }
 
-    // --- CONFIGURACIÓN MEDIAPIPE ---
-    function onResults(results) {
-        // Ocultar pantalla de carga cuando detectamos algo por primera vez o el sistema corre
-        loadingScreen.style.opacity = '0';
-        setTimeout(() => loadingScreen.style.display = 'none', 500);
+    animate();
 
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            statusDot.classList.add('active');
-            statusText.innerText = "Mano detectada - Control activo";
-            statusText.classList.add("text-green-400");
-            statusText.classList.remove("text-gray-300");
-
-            const landmarks = results.multiHandLandmarks[0];
-            
-            // Usamos la muñeca (punto 0) y el dedo medio (punto 9) para calcular el centro aproximado
-            // MediaPipe da coordenadas de 0 a 1.
-            // x: 0 (izq) a 1 (der)
-            // y: 0 (arriba) a 1 (abajo)
-            
-            const indexFinger = landmarks[8]; // Punta del índice
-            const thumb = landmarks[4]; // Punta del pulgar
-            const palmBase = landmarks[0]; // Muñeca
-
-            // 1. Mover cursor visual
-            // Invertimos X porque el video está en modo espejo
-            const cursorX = (1 - indexFinger.x) * 100; 
-            const cursorY = indexFinger.y * 100;
-            
-            handCursor.style.display = 'block';
-            handCursor.style.left = cursorX + '%';
-            handCursor.style.top = cursorY + '%';
-
-            // 2. Controlar Rotación de la Tierra
-            // Mapear posición X de la mano a rotación Y de la tierra
-            // Centro de la pantalla (0.5) es rotación 0
-            const sensitivity = 4.0; // Cuánto gira
-            targetRotationY = (indexFinger.x - 0.5) * sensitivity * -1; // -1 para invertir dirección natural
-            targetRotationX = (indexFinger.y - 0.5) * sensitivity;
-
-            // 3. Controlar Zoom (Distancia entre pulgar e índice)
-            const dx = indexFinger.x - thumb.x;
-            const dy = indexFinger.y - thumb.y;
-            const distance = Math.sqrt(dx*dx + dy*dy);
-
-            // Si la distancia es pequeña (pellizco), acercamos. Si es grande, alejamos (o viceversa)
-            // Distancia normal abierta ~0.2 - 0.3, cerrada < 0.05
-            // Vamos a mapearlo: Abierto = Lejos (z=6), Cerrado = Cerca (z=2.5)
-            // Ajustar estos valores según la sensación
-            let zoomFactor = Math.max(0, Math.min(1, (distance - 0.05) * 4)); // Normalizar entre 0 y 1
-            targetZoom = 3 + (zoomFactor * 3); // Mapear a rango de cámara Z (3 a 6)
-
-        } else {
-            statusDot.classList.remove('active');
-            statusText.innerText = "Buscando mano...";
-            statusText.classList.remove("text-green-400");
-            handCursor.style.display = 'none';
-        }
-    }
-
-    // Inicializar MediaPipe Hands
-    const hands = new Hands({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-
-    hands.onResults(onResults);
-
-    // Inicializar Cámara
-    const cameraUtils = new Camera(videoElement, {
-        onFrame: async () => {
-            await hands.send({image: videoElement});
-        },
-        width: 1280,
-        height: 720
-    });
-
-    // Arrancar todo
-    window.onload = () => {
-        initThreeJS();
-        cameraUtils.start()
-            .then(() => {
-                console.log("Cámara iniciada");
-            })
-            .catch(err => {
-                console.error("Error al iniciar cámara", err);
-                loadingScreen.innerHTML = `<h2 class='text-red-500 font-bold'>Error</h2><p>No se pudo acceder a la cámara.<br>Verifica los permisos del navegador.</p>`;
-            });
-    };
-
-    // Ajustar al redimensionar ventana
+    // Resize
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
-
 </script>
+
 </body>
 </html>
