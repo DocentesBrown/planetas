@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dibujo Espacial & Tierra 3D</title>
+    <title>Pizarra Matemática IA</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Tesseract.js (OCR) -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'></script>
     <!-- MediaPipe Hands -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
@@ -15,39 +15,30 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #111; font-family: 'Segoe UI', sans-serif; }
+        
         #container { position: relative; width: 100vw; height: 100vh; }
         
-        /* Video de fondo (espejo) */
+        /* Video oscuro para referencia visual */
         #input_video {
             position: absolute;
             width: 100%; height: 100%;
             object-fit: cover;
             transform: scaleX(-1);
+            opacity: 0.1; /* Casi invisible, solo para referencia */
             z-index: 1;
-            opacity: 0.5; /* Un poco oscuro para que resalte el dibujo */
         }
 
-        /* Capa 3D (Tierra) */
-        #three_canvas {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            z-index: 2;
-            pointer-events: none;
-        }
-
-        /* Capa de Dibujo 2D */
+        /* Lienzo de dibujo */
         #draw_canvas {
             position: absolute;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            z-index: 3;
-            transform: scaleX(-1); /* Espejo para coincidir con video */
-            pointer-events: none;
+            z-index: 5;
+            transform: scaleX(-1);
         }
 
-        /* UI */
+        /* UI Overlay */
         #ui-layer {
             position: absolute;
             top: 0; left: 0;
@@ -60,244 +51,247 @@
             padding: 20px;
         }
 
-        .hud-panel {
-            background: rgba(0, 0, 0, 0.7);
-            border-left: 4px solid #00aaff;
+        .result-box {
+            background: rgba(20, 20, 20, 0.9);
+            border: 2px solid #00ffcc;
+            color: #00ffcc;
+            padding: 20px;
+            border-radius: 15px;
+            font-size: 2rem;
+            text-align: center;
+            min-width: 300px;
+            align-self: center;
+            margin-top: 20px;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+            backdrop-filter: blur(10px);
+            transition: transform 0.2s;
+        }
+
+        .guide-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
             padding: 15px;
             color: white;
-            max-width: 350px;
-            border-radius: 0 10px 10px 0;
-            backdrop-filter: blur(4px);
+            font-size: 0.9rem;
         }
 
-        .mode-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: bold;
-            margin-top: 5px;
-            transition: all 0.3s;
-        }
-        .mode-rotate { background: #00aaff; color: white; box-shadow: 0 0 10px #00aaff; }
-        .mode-draw { background: #ff00ff; color: white; box-shadow: 0 0 10px #ff00ff; }
-        .mode-clear { background: #ff3333; color: white; }
-        .mode-idle { background: #555; color: #ccc; }
-
-        .loader {
-            position: absolute; top: 50%; left: 50%;
+        .cursor {
+            position: absolute;
+            width: 20px; height: 20px;
+            border: 2px solid white;
+            border-radius: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: #00aaff;
-            padding: 30px;
-            border-radius: 15px;
-            text-align: center;
-            border: 1px solid #00aaff;
-            z-index: 50;
+            z-index: 20;
+            pointer-events: none;
+            display: none;
+        }
+
+        /* Animación de carga */
+        .scanning-line {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 4px;
+            background: #00ffcc;
+            box-shadow: 0 0 10px #00ffcc;
+            animation: scan 2s linear infinite;
+            display: none;
+            z-index: 6;
+        }
+
+        @keyframes scan {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
         }
     </style>
 </head>
 <body>
 
 <div id="container">
+    <div id="scanning-line" class="scanning-line"></div>
     <video id="input_video" playsinline></video>
-    <canvas id="three_canvas"></canvas>
     <canvas id="draw_canvas"></canvas>
+    
+    <!-- Cursor visual para saber dónde está la mano -->
+    <div id="hand-cursor" class="cursor"></div>
 
     <div id="ui-layer">
-        <div class="hud-panel mt-4">
-            <h1 class="text-2xl font-bold mb-1 text-cyan-300">Estudio Espacial</h1>
-            <div id="status-badge" class="mode-badge mode-idle">Esperando cámara...</div>
-            <div class="mt-4 text-sm space-y-2 text-gray-300">
-                <div class="flex items-center">
-                    <span class="text-xl w-8">🖐️</span>
-                    <span><strong>Mano Abierta:</strong> Rotar Tierra</span>
-                </div>
-                <div class="flex items-center">
-                    <span class="text-xl w-8">☝️</span>
-                    <span><strong>Dedo Índice:</strong> Dibujar Luz</span>
-                </div>
-                <div class="flex items-center">
-                    <span class="text-xl w-8">✊</span>
-                    <span><strong>Puño Cerrado:</strong> Borrar Todo</span>
-                </div>
+        <div id="result-display" class="result-box">
+            <span class="text-sm block text-gray-400 mb-1">Resultado</span>
+            <span id="math-output">--</span>
+        </div>
+
+        <div class="flex justify-between items-end">
+            <div class="guide-panel">
+                <p class="font-bold text-yellow-400 mb-1">Gestos:</p>
+                <div class="flex items-center gap-2"><span>☝️</span> Índice: <span class="text-gray-300">Dibujar</span></div>
+                <div class="flex items-center gap-2"><span>🖐️</span> Palma: <span class="text-gray-300">Mover</span></div>
+                <div class="flex items-center gap-2"><span>✊</span> Puño: <span class="text-gray-300">Borrar</span></div>
+                <div class="flex items-center gap-2"><span>👍</span> Pulgar: <span class="text-gray-300">CALCULAR</span></div>
+            </div>
+            
+            <div id="status-text" class="text-white bg-black bg-opacity-50 px-4 py-2 rounded-lg">
+                Iniciando cámara...
             </div>
         </div>
-        
-        <div class="text-right text-xs text-gray-400 mb-2">
-            Usa buena iluminación para mejor detección
-        </div>
-    </div>
-
-    <div id="loading-screen" class="loader">
-        <h2 class="text-2xl font-bold mb-2">Iniciando Sistemas</h2>
-        <p class="animate-pulse">Cargando IA y Modelos 3D...</p>
-        <p class="text-xs mt-4 text-gray-500">Por favor permite el acceso a la cámara.</p>
     </div>
 </div>
 
 <script>
-    // --- ELEMENTOS ---
     const videoElement = document.getElementById('input_video');
-    const threeCanvas = document.getElementById('three_canvas');
     const drawCanvas = document.getElementById('draw_canvas');
     const ctx = drawCanvas.getContext('2d');
-    const statusBadge = document.getElementById('status-badge');
-    const loadingScreen = document.getElementById('loading-screen');
+    const handCursor = document.getElementById('hand-cursor');
+    const outputText = document.getElementById('math-output');
+    const statusText = document.getElementById('status-text');
+    const scanner = document.getElementById('scanning-line');
+    const resultBox = document.getElementById('result-display');
 
-    // --- VARIABLES DE ESTADO ---
-    let width, height;
     let isDrawing = false;
+    let isCalculating = false;
     let lastX = 0, lastY = 0;
-    let hue = 0; // Color del arcoíris
+    let recognitionWorker = null;
 
-    // Three.js Vars
-    let scene, camera, renderer, earth, clouds;
-    let targetRotX = 0, targetRotY = 0;
-    let currentRotX = 0, currentRotY = 0;
+    // Configuración del Pincel
+    ctx.lineWidth = 12; // Línea gruesa para que la IA lea mejor
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#ffffff'; // Blanco puro para alto contraste
 
-    // --- INICIALIZACIÓN THREE.JS (TIERRA) ---
-    function initThree() {
-        scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.z = 6;
-
-        renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.outputEncoding = THREE.sRGBEncoding;
-
-        // Texturas
-        const loader = new THREE.TextureLoader();
-        loader.crossOrigin = 'anonymous'; // IMPORTANTE
-
-        const earthGeo = new THREE.SphereGeometry(1.5, 64, 64);
-        const earthMat = new THREE.MeshPhongMaterial({
-            map: loader.load('https://upload.wikimedia.org/wikipedia/commons/c/c1/Earth_Day_2026_Color_Image.jpg'),
-            bumpMap: loader.load('https://upload.wikimedia.org/wikipedia/commons/c/c3/Solarsystemscope_texture_2k_earth_normal_map.png'),
-            bumpScale: 0.05,
-            specularMap: loader.load('https://upload.wikimedia.org/wikipedia/commons/1/15/Solarsystemscope_texture_2k_earth_specular_map.png'),
-            specular: new THREE.Color('grey')
-        });
-        earth = new THREE.Mesh(earthGeo, earthMat);
-        scene.add(earth);
-
-        const cloudGeo = new THREE.SphereGeometry(1.53, 64, 64);
-        const cloudMat = new THREE.MeshLambertMaterial({
-            map: loader.load('https://upload.wikimedia.org/wikipedia/commons/0/07/Solarsystemscope_texture_2k_earth_clouds.jpg'),
-            transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
-        });
-        clouds = new THREE.Mesh(cloudGeo, cloudMat);
-        scene.add(clouds);
-
-        // Luces
-        scene.add(new THREE.AmbientLight(0x333333));
-        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(5, 3, 5);
-        scene.add(sun);
-        const rim = new THREE.SpotLight(0x00aaff, 2);
-        rim.position.set(-5, 0, 2);
-        rim.lookAt(earth.position);
-        scene.add(rim);
-
-        animateThree();
-    }
-
-    function animateThree() {
-        requestAnimationFrame(animateThree);
-        
-        // Lerp para suavidad
-        currentRotX += (targetRotX - currentRotX) * 0.1;
-        currentRotY += (targetRotY - currentRotY) * 0.1;
-
-        if(earth) {
-            earth.rotation.y = currentRotY;
-            earth.rotation.x = currentRotX;
-            clouds.rotation.y = currentRotY + Date.now() * 0.0001;
-            clouds.rotation.x = currentRotX;
+    // --- 1. INICIALIZAR TESSERACT (OCR) ---
+    async function initOCR() {
+        statusText.innerText = "Cargando cerebro matemático...";
+        try {
+            recognitionWorker = await Tesseract.createWorker();
+            await recognitionWorker.loadLanguage('eng');
+            await recognitionWorker.initialize('eng');
+            // Restringir caracteres a números y operadores para mejorar precisión
+            await recognitionWorker.setParameters({
+                tessedit_char_whitelist: '0123456789+-x*/=',
+            });
+            statusText.innerText = "Sistema listo. ¡Dibuja!";
+        } catch (e) {
+            console.error(e);
+            statusText.innerText = "Error cargando OCR. Revisa tu conexión.";
         }
-        renderer.render(scene, camera);
     }
 
-    // --- LÓGICA DE DIBUJO Y GESTOS ---
+    // --- 2. LÓGICA MATEMÁTICA ---
+    async function performCalculation() {
+        if (isCalculating) return;
+        isCalculating = true;
+        scanner.style.display = 'block';
+        statusText.innerText = "Analizando pizarra...";
+        
+        // Efecto visual UI
+        resultBox.style.transform = "scale(1.1)";
+        setTimeout(() => resultBox.style.transform = "scale(1)", 200);
+
+        try {
+            // Convertir canvas a imagen
+            // Importante: Tesseract lee mejor negro sobre blanco o blanco sobre negro muy claro.
+            // Enviaremos el canvas tal cual (Blanco sobre transparente/negro)
+            
+            const { data: { text } } = await recognitionWorker.recognize(drawCanvas);
+            
+            console.log("Detectado:", text);
+            
+            // Limpiar texto (quitar espacios y caracteres extraños)
+            let cleanText = text.replace(/[^0-9+\-*\/x]/g, '');
+            // Reemplazar 'x' por '*'
+            cleanText = cleanText.replace(/x/g, '*');
+
+            if (cleanText.length > 0) {
+                try {
+                    // CÁLCULO SEGURO
+                    // Usamos Function en vez de eval directo por seguridad mínima, aunque en local es ok.
+                    const result = new Function('return ' + cleanText)();
+                    
+                    // Mostrar
+                    if (result !== undefined && !isNaN(result)) {
+                        outputText.innerText = `${cleanText} = ${result}`;
+                        statusText.innerText = "¡Cálculo completado!";
+                    } else {
+                        outputText.innerText = "?";
+                        statusText.innerText = "No entendí la cuenta.";
+                    }
+                } catch (mathErr) {
+                    outputText.innerText = cleanText + " ?";
+                    statusText.innerText = "Operación inválida.";
+                }
+            } else {
+                statusText.innerText = "Pizarra vacía o ilegible.";
+            }
+
+        } catch (err) {
+            console.error(err);
+            statusText.innerText = "Error al leer.";
+        }
+
+        isCalculating = false;
+        scanner.style.display = 'none';
+    }
+
+    // --- 3. DETECCIÓN DE GESTOS ---
     function detectGesture(landmarks) {
-        // Puntos clave
         const indexTip = landmarks[8];
-        const indexDip = landmarks[7]; // Nudillo superior
+        const thumbTip = landmarks[4];
         const middleTip = landmarks[12];
         const ringTip = landmarks[16];
         const pinkyTip = landmarks[20];
-        const thumbTip = landmarks[4];
+        const wrist = landmarks[0];
 
-        // Lógica simple de dedos levantados (Y menor es más arriba en pantalla)
-        // Pero usamos la distancia relativa al nudillo para ser más precisos independientemente de la rotación
-        // Simplificación: Un dedo está "abajo" si su punta está más abajo que su nudillo base en coordenadas locales
-        // Usaremos una heurística simple basada en Y para "puño vs mano abierta"
-        
-        // 1. Detectar PUÑO (Todos los dedos cerrados cerca de la palma)
-        // Comprobar si las puntas están cerca de la base de la palma (landmark 0)
-        const isFist = (
-            dist(indexTip, landmarks[0]) < 0.3 &&
-            dist(middleTip, landmarks[0]) < 0.3 &&
-            dist(ringTip, landmarks[0]) < 0.3
-        );
+        // Función distancia
+        const d = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 
-        if (isFist) return 'CLEAR';
+        // A. PUÑO (Todos los dedos cerrados) -> BORRAR
+        const fingersClosed = d(indexTip, wrist) < 0.4 && d(middleTip, wrist) < 0.4 && d(ringTip, wrist) < 0.4;
+        if (fingersClosed) return 'CLEAR';
 
-        // 2. Detectar "SOLO INDICE" (Pointing)
-        // El índice está extendido, los otros (medio, anular, meñique) están cerrados
-        const indexExtended = dist(indexTip, landmarks[0]) > 0.4; // Índice lejos de la palma
-        const othersClosed = (
-            dist(middleTip, landmarks[0]) < 0.35 &&
-            dist(ringTip, landmarks[0]) < 0.35
-        );
-
-        if (indexExtended && othersClosed) return 'DRAW';
-
-        // 3. Detectar MANO ABIERTA (Todos extendidos)
-        if (dist(middleTip, landmarks[0]) > 0.4 && dist(ringTip, landmarks[0]) > 0.4) {
-            return 'ROTATE';
+        // B. PULGAR ARRIBA (Thumb Up) -> CALCULAR
+        // El pulgar está lejos, pero los otros dedos cerrados
+        if (d(thumbTip, wrist) > 0.4 && d(indexTip, wrist) < 0.4 && d(middleTip, wrist) < 0.4) {
+            return 'CALCULATE';
         }
 
-        return 'IDLE';
+        // C. ÍNDICE SOLO (Pointing) -> DIBUJAR
+        if (d(indexTip, wrist) > 0.4 && d(middleTip, wrist) < 0.35 && d(ringTip, wrist) < 0.35) {
+            return 'DRAW';
+        }
+
+        // D. MANO ABIERTA -> MOVER
+        return 'HOVER';
     }
 
-    function dist(p1, p2) {
-        return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-    }
-
+    // --- 4. MEDIAPIPE LOOP ---
     function onResults(results) {
-        loadingScreen.style.display = 'none';
-        
-        // Ajustar tamaño canvas dibujo si cambia ventana
+        // Ajustar tamaño canvas
         if (drawCanvas.width !== window.innerWidth) {
             drawCanvas.width = window.innerWidth;
             drawCanvas.height = window.innerHeight;
+            // Re-configurar pincel tras resize
+            ctx.lineWidth = 12; 
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#ffffff';
         }
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const landmarks = results.multiHandLandmarks[0];
             const gesture = detectGesture(landmarks);
             
-            // Coordenadas dedo índice para dibujar/rotar
-            // MediaPipe: x: 0-1, y: 0-1.
+            // Posición del dedo índice (revisar inversión X)
+            // MediaPipe X va de 0 a 1.
             const x = landmarks[8].x * drawCanvas.width;
             const y = landmarks[8].y * drawCanvas.height;
 
+            // Actualizar cursor visual
+            handCursor.style.display = 'block';
+            handCursor.style.left = ((1 - landmarks[8].x) * 100) + '%'; // Invertir visualmente para espejo
+            handCursor.style.top = (landmarks[8].y * 100) + '%';
+
+            // Máquina de estados
             if (gesture === 'DRAW') {
-                statusBadge.innerText = "Modo: PINCEL CÓSMICO";
-                statusBadge.className = "mode-badge mode-draw";
-                
-                // Dibujar
-                ctx.lineWidth = 8;
-                ctx.lineCap = 'round';
-                ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
-                hue = (hue + 2) % 360; // Ciclo de colores arcoíris
-
-                // Efecto de brillo
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = ctx.strokeStyle;
-
+                handCursor.style.borderColor = '#00ff00'; // Verde = Dibujando
                 if (!isDrawing) {
                     ctx.beginPath();
                     ctx.moveTo(x, y);
@@ -306,53 +300,28 @@
                     ctx.lineTo(x, y);
                     ctx.stroke();
                 }
-                lastX = x;
-                lastY = y;
-
-            } else if (gesture === 'ROTATE') {
-                statusBadge.innerText = "Modo: CONTROL TIERRA";
-                statusBadge.className = "mode-badge mode-rotate";
+            } else if (gesture === 'CALCULATE') {
+                handCursor.style.borderColor = '#ffff00'; // Amarillo = Calculando
                 isDrawing = false;
-                ctx.beginPath(); // Resetear path
-
-                // Controlar Tierra (Invertimos X para efecto espejo natural)
-                // Centro pantalla (0.5) -> rotación 0
-                targetRotY = (landmarks[8].x - 0.5) * -4;
-                targetRotX = (landmarks[8].y - 0.5) * 4;
-
+                if (!isCalculating) performCalculation();
             } else if (gesture === 'CLEAR') {
-                statusBadge.innerText = "Modo: BORRANDO...";
-                statusBadge.className = "mode-badge mode-clear";
+                handCursor.style.borderColor = '#ff0000'; // Rojo = Borrando
                 isDrawing = false;
-                
-                // Borrar canvas
                 ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
-                
+                outputText.innerText = "--";
             } else {
-                statusBadge.innerText = "Modo: ESPERA";
-                statusBadge.className = "mode-badge mode-idle";
+                handCursor.style.borderColor = '#ffffff'; // Blanco = Espera
                 isDrawing = false;
                 ctx.beginPath();
             }
 
-            // Dibujar cursor auxiliar pequeño siempre para saber dónde está el dedo
-            /*
-            ctx.save();
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.beginPath();
-            ctx.arc(x, y, 5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-            */
-
         } else {
-            statusBadge.innerText = "No veo tu mano...";
-            statusBadge.className = "mode-badge mode-idle";
+            handCursor.style.display = 'none';
             isDrawing = false;
         }
     }
 
-    // --- SETUP MEDIAPIPE ---
+    // --- 5. CONFIGURACIÓN INICIAL ---
     const hands = new Hands({locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     }});
@@ -364,8 +333,7 @@
     });
     hands.onResults(onResults);
 
-    // --- SETUP CAMARA ---
-    const cameraUtils = new Camera(videoElement, {
+    const camera = new Camera(videoElement, {
         onFrame: async () => {
             await hands.send({image: videoElement});
         },
@@ -373,22 +341,10 @@
         height: 720
     });
 
-    // --- INICIO ---
     window.onload = () => {
-        initThree();
-        cameraUtils.start().catch(e => {
-            console.error(e);
-            loadingScreen.innerHTML = "<h2 class='text-red-500'>Error de Cámara</h2><p>Verifica permisos</p>";
-        });
+        initOCR(); // Iniciar motor de lectura
+        camera.start();
     };
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        drawCanvas.width = window.innerWidth;
-        drawCanvas.height = window.innerHeight;
-    });
 
 </script>
 </body>
