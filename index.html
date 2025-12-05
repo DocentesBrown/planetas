@@ -86,6 +86,26 @@
             display: none;
         }
 
+        /* Botón de Borrar Estilizado */
+        #clear-btn {
+            background-color: #ff3333;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(255, 51, 51, 0.4);
+            cursor: pointer;
+            transition: transform 0.1s, background-color 0.2s;
+            pointer-events: auto; /* Asegurar que reciba clicks */
+        }
+        
+        #clear-btn:active {
+            transform: scale(0.95);
+            background-color: #cc0000;
+        }
+
         /* Animación de carga */
         .scanning-line {
             position: absolute;
@@ -122,18 +142,22 @@
             <span id="math-output">--</span>
         </div>
 
-        <div class="flex justify-between items-end">
+        <div class="flex justify-between items-end w-full">
             <div class="guide-panel">
                 <p class="font-bold text-yellow-400 mb-1">Gestos:</p>
                 <div class="flex items-center gap-2"><span>☝️</span> Índice: <span class="text-gray-300">Dibujar</span></div>
                 <div class="flex items-center gap-2"><span>🖐️</span> Palma: <span class="text-gray-300">Mover</span></div>
-                <div class="flex items-center gap-2"><span>✊</span> Puño: <span class="text-gray-300">Borrar</span></div>
                 <div class="flex items-center gap-2"><span>👍</span> Pulgar: <span class="text-gray-300">CALCULAR</span></div>
             </div>
             
-            <div id="status-text" class="text-white bg-black bg-opacity-50 px-4 py-2 rounded-lg">
-                Iniciando cámara...
-            </div>
+            <!-- Botón de Borrar Manual -->
+            <button id="clear-btn" class="mb-4 mr-4">
+                🗑️ Borrar Todo
+            </button>
+        </div>
+        
+        <div id="status-text" class="absolute top-4 right-4 text-white bg-black bg-opacity-50 px-4 py-2 rounded-lg">
+            Iniciando cámara...
         </div>
     </div>
 </div>
@@ -147,6 +171,7 @@
     const statusText = document.getElementById('status-text');
     const scanner = document.getElementById('scanning-line');
     const resultBox = document.getElementById('result-display');
+    const clearBtn = document.getElementById('clear-btn');
 
     let isDrawing = false;
     let isCalculating = false;
@@ -244,10 +269,8 @@
         // Función distancia
         const d = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 
-        // A. PUÑO (Todos los dedos cerrados) -> BORRAR
-        const fingersClosed = d(indexTip, wrist) < 0.4 && d(middleTip, wrist) < 0.4 && d(ringTip, wrist) < 0.4;
-        if (fingersClosed) return 'CLEAR';
-
+        // A. PUÑO -> YA NO SE USA PARA BORRAR (Causaba conflictos)
+        
         // B. PULGAR ARRIBA (Thumb Up) -> CALCULAR
         // El pulgar está lejos, pero los otros dedos cerrados
         if (d(thumbTip, wrist) > 0.4 && d(indexTip, wrist) < 0.4 && d(middleTip, wrist) < 0.4) {
@@ -255,13 +278,24 @@
         }
 
         // C. ÍNDICE SOLO (Pointing) -> DIBUJAR
-        if (d(indexTip, wrist) > 0.4 && d(middleTip, wrist) < 0.35 && d(ringTip, wrist) < 0.35) {
+        // Relajamos un poco la detección: Si el índice está lejos y el resto "relativamente" cerca
+        if (d(indexTip, wrist) > 0.3 && d(middleTip, wrist) < 0.35 && d(ringTip, wrist) < 0.35) {
             return 'DRAW';
         }
 
         // D. MANO ABIERTA -> MOVER
         return 'HOVER';
     }
+
+    // --- FUNCIÓN BORRAR ---
+    function clearBoard() {
+        ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        outputText.innerText = "--";
+        statusText.innerText = "Pizarra limpia";
+    }
+
+    // Evento Click Botón
+    clearBtn.addEventListener('click', clearBoard);
 
     // --- 4. MEDIAPIPE LOOP ---
     function onResults(results) {
@@ -304,12 +338,8 @@
                 handCursor.style.borderColor = '#ffff00'; // Amarillo = Calculando
                 isDrawing = false;
                 if (!isCalculating) performCalculation();
-            } else if (gesture === 'CLEAR') {
-                handCursor.style.borderColor = '#ff0000'; // Rojo = Borrando
-                isDrawing = false;
-                ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
-                outputText.innerText = "--";
             } else {
+                // HOVER u otros
                 handCursor.style.borderColor = '#ffffff'; // Blanco = Espera
                 isDrawing = false;
                 ctx.beginPath();
